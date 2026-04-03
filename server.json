@@ -1,33 +1,37 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "eu.ansvar/greek-data-protection-mcp",
-  "description": "Query HDPA decisions, sanctions, and guidance on data protection and GDPR enforcement in Greece",
+  "description": "HDPA (Hellenic Data Protection Authority) MCP server — decisions, sanctions, and guidance on GDPR enforcement in Greece",
   "repository": {
     "url": "https://github.com/Ansvar-Systems/greek-data-protection-mcp",
     "source": "github"
   },
   "homepage": "https://ansvar.eu",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "license": "Apache-2.0",
   "keywords": [
-    "hdpa",
-    "greek-data-protection",
-    "gdpr",
+    "data protection",
     "greece",
-    "data-protection",
-    "privacy",
-    "sanctions",
+    "regulation",
     "compliance",
-    "mcp",
-    "ansvar"
+    "mcp"
   ],
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@ansvar/greek-data-protection-mcp",
-      "version": "0.1.0",
+      "version": "1.0.0",
       "transport": {
         "type": "stdio"
+      }
+    },
+    {
+      "registryType": "npm",
+      "identifier": "@ansvar/greek-data-protection-mcp",
+      "version": "1.0.0",
+      "transport": {
+        "type": "streamable-http",
+        "url": "https://mcp.ansvar.eu/greek-data-protection/mcp"
       }
     }
   ]
