@@ -1,0 +1,118 @@
+# =============================================================================
+# Data Freshness Check — Verify HDPA corpus is up to date
+# =============================================================================
+#
+# Runs weekly to check whether newer decisions or guidelines exist on the
+# HDPA website (https://www.dpa.gr/) that are not yet indexed in this corpus.
+#
+# If new content is detected, opens a GitHub issue as a reminder to run
+# `npm run ingest` and redeploy.
+#
+# =============================================================================
+
+name: Check Data Freshness
+
+on:
+  schedule:
+    # Run every Monday at 08:00 UTC
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-freshness:
+    name: Check HDPA Corpus Freshness
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check corpus data age
+        id: freshness
+        run: |
+          DATA_AGE="2026-02-11"
+          TODAY=$(date +%Y-%m-%d)
+          echo "data_age=$DATA_AGE" >> "$GITHUB_OUTPUT"
+          echo "today=$TODAY" >> "$GITHUB_OUTPUT"
+
+          # Calculate days since last update
+          DATA_AGE_SECS=$(date -d "$DATA_AGE" +%s)
+          TODAY_SECS=$(date -d "$TODAY" +%s)
+          DAYS_OLD=$(( (TODAY_SECS - DATA_AGE_SECS) / 86400 ))
+          echo "days_old=$DAYS_OLD" >> "$GITHUB_OUTPUT"
+
+          if [ "$DAYS_OLD" -gt 30 ]; then
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open staleness issue
+        if: steps.freshness.outputs.stale == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const daysOld = ${{ steps.freshness.outputs.days_old }};
+            const dataAge = "${{ steps.freshness.outputs.data_age }}";
+            const today = "${{ steps.freshness.outputs.today }}";
+
+            // Check if a freshness issue is already open
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "data-freshness",
+            });
+
+            if (issues.data.length > 0) {
+              console.log("Freshness issue already open, skipping.");
+              return;
+            }
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Data Freshness] Corpus is ${daysOld} days old — run ingest`,
+              labels: ["data-freshness", "automated"],
+              body: [
+                "## Corpus Staleness Alert",
+                "",
+                `The HDPA corpus was last updated on **${dataAge}** (${daysOld} days ago as of ${today}).`,
+                "",
+                "### Action Required",
+                "",
+                "1. Run `npm run ingest` to pull the latest decisions and guidelines from https://www.dpa.gr/",
+                "2. Verify the new data with `npm run build`",
+                "3. Commit the updated `data/` directory",
+                "4. Push and redeploy to trigger a new Docker image build",
+                "",
+                "### Why this matters",
+                "",
+                "The golden standard requires data freshness checks to ensure users get current regulatory information.",
+                "",
+                "*This issue was created automatically by the check-freshness workflow.*",
+              ].join("\n"),
+            });
+
+      - name: Summary
+        run: |
+          echo "## Data Freshness Check" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Corpus data age | \`${{ steps.freshness.outputs.data_age }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Days old | ${{ steps.freshness.outputs.days_old }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Stale (>30 days) | ${{ steps.freshness.outputs.stale }} |" >> "$GITHUB_STEP_SUMMARY"
