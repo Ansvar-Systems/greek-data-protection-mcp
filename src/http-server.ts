@@ -30,12 +30,25 @@ import {
   getGuideline,
   listTopics,
 } from "./db.js";
+import { buildCitation } from "./utils/citation.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const PORT = parseInt(process.env["PORT"] ?? "3000", 10);
 const SERVER_NAME = "greek-data-protection-mcp";
+const DATA_AGE = "2026-02-11";
+
+function responseMeta(sourceUrl?: string) {
+  return {
+    disclaimer:
+      "For informational purposes only. Not legal or regulatory advice. Verify against official HDPA sources before relying on this information.",
+    data_age: DATA_AGE,
+    copyright:
+      "Hellenic Data Protection Authority (HDPA / ΑΠΔΠΧ). Source: https://www.dpa.gr/",
+    ...(sourceUrl !== undefined && { source_url: sourceUrl }),
+  };
+}
 
 let pkgVersion = "0.1.0";
 try {
@@ -121,6 +134,16 @@ const TOOLS = [
     description: "Return metadata about this MCP server: version, data source, coverage, and tool list.",
     inputSchema: { type: "object" as const, properties: {}, required: [] },
   },
+  {
+    name: "gr_dp_list_sources",
+    description: "List official data sources used by this MCP server.",
+    inputSchema: { type: "object" as const, properties: {}, required: [] },
+  },
+  {
+    name: "gr_dp_check_data_freshness",
+    description: "Check when the corpus data was last updated and confirm the source URL.",
+    inputSchema: { type: "object" as const, properties: {}, required: [] },
+  },
 ];
 
 // --- Zod schemas -------------------------------------------------------------
@@ -168,9 +191,14 @@ function createMcpServer(): Server {
       };
     }
 
-    function errorContent(message: string) {
+    function errorContent(message: string, errorType: string = "not_found") {
       return {
-        content: [{ type: "text" as const, text: message }],
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ error: message, _meta: responseMeta(), _error_type: errorType }, null, 2),
+          },
+        ],
         isError: true as const,
       };
     }
@@ -185,7 +213,19 @@ function createMcpServer(): Server {
             topic: parsed.topic,
             limit: parsed.limit,
           });
-          return textContent({ results, count: results.length });
+          return textContent({
+            results: results.map((r) => ({
+              ...r,
+              _citation: buildCitation(
+                (r as Record<string, unknown>).reference as string,
+                (r as Record<string, unknown>).title as string,
+                "gr_dp_get_decision",
+                { reference: (r as Record<string, unknown>).reference as string },
+              ),
+            })),
+            count: results.length,
+            _meta: responseMeta(),
+          });
         }
 
         case "gr_dp_get_decision": {
@@ -194,7 +234,18 @@ function createMcpServer(): Server {
           if (!decision) {
             return errorContent(`Decision not found: ${parsed.reference}`);
           }
-          return textContent(decision);
+          const d = decision as Record<string, unknown>;
+          return textContent({
+            ...decision,
+            _citation: buildCitation(
+              String(d.reference ?? parsed.reference),
+              String(d.title ?? d.reference ?? parsed.reference),
+              "gr_dp_get_decision",
+              { reference: parsed.reference },
+              d.url as string | undefined,
+            ),
+            _meta: responseMeta(d.url as string | undefined),
+          });
         }
 
         case "gr_dp_search_guidelines": {
@@ -205,7 +256,19 @@ function createMcpServer(): Server {
             topic: parsed.topic,
             limit: parsed.limit,
           });
-          return textContent({ results, count: results.length });
+          return textContent({
+            results: results.map((r) => ({
+              ...r,
+              _citation: buildCitation(
+                ((r as Record<string, unknown>).reference ?? (r as Record<string, unknown>).title) as string,
+                (r as Record<string, unknown>).title as string,
+                "gr_dp_get_guideline",
+                { id: String((r as Record<string, unknown>).id) },
+              ),
+            })),
+            count: results.length,
+            _meta: responseMeta(),
+          });
         }
 
         case "gr_dp_get_guideline": {
@@ -214,12 +277,23 @@ function createMcpServer(): Server {
           if (!guideline) {
             return errorContent(`Guideline not found: id=${parsed.id}`);
           }
-          return textContent(guideline);
+          const g = guideline as Record<string, unknown>;
+          return textContent({
+            ...guideline,
+            _citation: buildCitation(
+              String(g.reference ?? g.title ?? `Guideline #${parsed.id}`),
+              String(g.title ?? g.reference ?? `Guideline #${parsed.id}`),
+              "gr_dp_get_guideline",
+              { id: String(parsed.id) },
+              g.url as string | undefined,
+            ),
+            _meta: responseMeta(g.url as string | undefined),
+          });
         }
 
         case "gr_dp_list_topics": {
           const topics = listTopics();
-          return textContent({ topics, count: topics.length });
+          return textContent({ topics, count: topics.length, _meta: responseMeta() });
         }
 
         case "gr_dp_about": {
@@ -230,15 +304,32 @@ function createMcpServer(): Server {
               "HDPA (Hellenic Data Protection Authority) MCP server. Provides access to Greek data protection authority decisions, sanctions, reprimands, and official guidance documents.",
             data_source: "HDPA (https://www.dpa.gr/)",
             tools: TOOLS.map((t) => ({ name: t.name, description: t.description })),
+            _meta: responseMeta(),
+          });
+        }
+
+        case "gr_dp_list_sources": {
+          return textContent({
+            sources: [{ name: "HDPA", url: "https://www.dpa.gr/" }],
+            _meta: responseMeta(),
+          });
+        }
+
+        case "gr_dp_check_data_freshness": {
+          return textContent({
+            data_age: DATA_AGE,
+            source: "https://www.dpa.gr/",
+            _meta: responseMeta(),
           });
         }
 
         default:
-          return errorContent(`Unknown tool: ${name}`);
+          return errorContent(`Unknown tool: ${name}`, "unknown_tool");
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return errorContent(`Error executing ${name}: ${message}`);
+      const errorType = err instanceof z.ZodError ? "validation_error" : "internal_error";
+      return errorContent(`Error executing ${name}: ${message}`, errorType);
     }
   });
 
