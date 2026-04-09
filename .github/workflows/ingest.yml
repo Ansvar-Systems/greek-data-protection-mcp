@@ -1,0 +1,117 @@
+# =============================================================================
+# Ingest Workflow — Pull latest HDPA decisions and guidelines
+# =============================================================================
+#
+# Manually triggered to run the ingest script, commit updated data, and
+# open a PR against dev for review before deploying to production.
+#
+# Trigger manually via: Actions → Ingest HDPA Data → Run workflow
+#
+# =============================================================================
+
+name: Ingest HDPA Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      open_pr:
+        description: "Open a PR to dev after ingest"
+        required: false
+        default: "true"
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  ingest:
+    name: Run Ingest and Commit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Run ingest
+        run: npm run ingest
+        env:
+          NODE_ENV: production
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet data/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat data/
+          fi
+
+      - name: Commit updated data
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="ingest/$(date +%Y-%m-%d)"
+          git checkout -b "$BRANCH"
+          git add data/
+          git commit -m "chore: ingest HDPA data $(date +%Y-%m-%d)"
+          git push -u origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+        id: commit
+
+      - name: Open PR to dev
+        if: steps.changes.outputs.changed == 'true' && inputs.open_pr == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = "${{ steps.commit.outputs.branch }}";
+            const today = new Date().toISOString().split("T")[0];
+
+            const pr = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `chore: ingest HDPA data ${today}`,
+              head: branch,
+              base: "dev",
+              body: [
+                "## HDPA Data Ingest",
+                "",
+                `Automated ingest run on ${today}.`,
+                "",
+                "### Checklist",
+                "",
+                "- [ ] Verify new decisions are correctly parsed",
+                "- [ ] Verify new guidelines are correctly parsed",
+                "- [ ] Run `npm run build` locally to confirm no errors",
+                "- [ ] Check `gr_dp_check_data_freshness` tool returns updated date",
+                "",
+                "*This PR was created automatically by the ingest workflow.*",
+              ].join("\n"),
+            });
+
+            console.log(`PR created: ${pr.data.html_url}`);
+
+      - name: Summary
+        run: |
+          echo "## Ingest Workflow" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Data changed | ${{ steps.changes.outputs.changed }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Date | $(date +%Y-%m-%d) |" >> "$GITHUB_STEP_SUMMARY"
