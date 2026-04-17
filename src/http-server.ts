@@ -217,10 +217,10 @@ function createMcpServer(): Server {
             results: results.map((r) => ({
               ...r,
               _citation: buildCitation(
-                (r as Record<string, unknown>).reference as string,
-                (r as Record<string, unknown>).title as string,
+                (r as unknown as Record<string, unknown>).reference as string,
+                (r as unknown as Record<string, unknown>).title as string,
                 "gr_dp_get_decision",
-                { reference: (r as Record<string, unknown>).reference as string },
+                { reference: (r as unknown as Record<string, unknown>).reference as string },
               ),
             })),
             count: results.length,
@@ -234,7 +234,7 @@ function createMcpServer(): Server {
           if (!decision) {
             return errorContent(`Decision not found: ${parsed.reference}`);
           }
-          const d = decision as Record<string, unknown>;
+          const d = decision as unknown as Record<string, unknown>;
           return textContent({
             ...decision,
             _citation: buildCitation(
@@ -260,10 +260,10 @@ function createMcpServer(): Server {
             results: results.map((r) => ({
               ...r,
               _citation: buildCitation(
-                ((r as Record<string, unknown>).reference ?? (r as Record<string, unknown>).title) as string,
-                (r as Record<string, unknown>).title as string,
+                ((r as unknown as Record<string, unknown>).reference ?? (r as unknown as Record<string, unknown>).title) as string,
+                (r as unknown as Record<string, unknown>).title as string,
                 "gr_dp_get_guideline",
-                { id: String((r as Record<string, unknown>).id) },
+                { id: String((r as unknown as Record<string, unknown>).id) },
               ),
             })),
             count: results.length,
@@ -277,7 +277,7 @@ function createMcpServer(): Server {
           if (!guideline) {
             return errorContent(`Guideline not found: id=${parsed.id}`);
           }
-          const g = guideline as Record<string, unknown>;
+          const g = guideline as unknown as Record<string, unknown>;
           return textContent({
             ...guideline,
             _citation: buildCitation(
